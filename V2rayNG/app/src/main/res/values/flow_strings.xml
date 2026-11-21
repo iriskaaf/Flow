@@ -172,6 +172,8 @@
     <string name="flow_show_system_apps">Show system apps</string>
     <string name="flow_show_user_apps">Hide system apps</string>
     <string name="flow_add_russian_apps">Add Russian services</string>
+    <string name="flow_remove_russian_apps">Remove Russian services</string>
+    <string name="flow_reset_selected_apps">Clear selected apps</string>
     <string name="flow_no_apps">No apps found</string>
     <string name="flow_developer">Developer · %1$s</string>
     <string name="flow_components">Components</string>

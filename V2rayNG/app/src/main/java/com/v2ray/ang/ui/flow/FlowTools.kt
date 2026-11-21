@@ -3,6 +3,7 @@ package com.v2ray.ang.ui.flow
 import android.content.Context
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.fadeIn
@@ -30,11 +31,11 @@ import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -168,12 +169,8 @@ private enum class AppRoutingMode(val label: Int, val icon: Int) {
 private fun AppRoutingPage(actions: FlowActivity, back: () -> Unit) {
     val context = LocalContext.current
     val colors = MaterialTheme.colorScheme
-    val apps by produceState<List<AppInfo>?>(null, context) {
-        value = withContext(Dispatchers.IO) {
-            AppManagerUtil.loadNetworkAppList(context).filterNot { it.packageName == context.packageName }
-                .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER, AppInfo::appName))
-        }
-    }
+    val motion = MaterialTheme.motionScheme
+    val focus = LocalFocusManager.current
     var selected by rememberSaveable {
         mutableStateOf(ArrayList(MmkvManager.decodeSettingsStringSet(AppConfig.PREF_PER_APP_PROXY_SET).orEmpty()))
     }
@@ -184,19 +181,15 @@ private fun AppRoutingPage(actions: FlowActivity, back: () -> Unit) {
             else -> AppRoutingMode.ONLY_SELECTED
         })
     }
-    var includeSystem by rememberSaveable { mutableStateOf(false) }
-    var query by rememberSaveable { mutableStateOf("") }
-    val selectedPackages = remember(selected) { selected.toSet() }
-    val (selectedApps, otherApps) = remember(query, includeSystem, apps, selectedPackages) {
-        val text = query.trim()
-        apps.orEmpty().filter { app ->
-            (includeSystem || !app.isSystemApp || app.packageName in selectedPackages) &&
-                (app.appName.contains(text, true) || app.packageName.contains(text, true))
-        }.partition { it.packageName in selectedPackages }
-    }
-    val unselectedRussianApps = remember(apps, selectedPackages) {
-        apps.orEmpty().map(AppInfo::packageName)
-            .filter { it in russianServicePackages && it !in selectedPackages }
+    val pickerVisible = mode != AppRoutingMode.ALL
+    val pickerState = rememberSaveableStateHolder()
+    val apps by produceState<List<AppInfo>?>(null, context, pickerVisible) {
+        if (pickerVisible && value == null) {
+            value = withContext(Dispatchers.IO) {
+                AppManagerUtil.loadNetworkAppList(context).filterNot { it.packageName == context.packageName }
+                    .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER, AppInfo::appName))
+            }
+        }
     }
 
     SettingsScreen(stringResource(R.string.flow_split), back, toolbar = {
@@ -219,7 +212,10 @@ private fun AppRoutingPage(actions: FlowActivity, back: () -> Unit) {
                         MaterialTheme.motionScheme.fastEffectsSpec(), label = "routing button color")
                     val label = stringResource(choice.label)
                     FilledIconButton(
-                        onClick = { mode = choice },
+                        onClick = {
+                            if (choice == AppRoutingMode.ALL) focus.clearFocus()
+                            mode = choice
+                        },
                         modifier = Modifier.size(60.dp).semantics {
                             this.selected = chosen
                             contentDescription = label
@@ -235,101 +231,175 @@ private fun AppRoutingPage(actions: FlowActivity, back: () -> Unit) {
                 }
             }
         }
-        Spacer(Modifier.height(14.dp))
-        val density = LocalDensity.current
-        val listState = rememberLazyListState()
-        var controlsHeight by remember { mutableIntStateOf(0) }
-        val inset = if (controlsHeight == 0) 162.dp else with(density) { controlsHeight.toDp() }
-        Box(Modifier.weight(1f).fillMaxWidth()) {
-            LazyColumn(
-                Modifier.fillMaxSize().flowHeaderFade(inset, 24.dp, visible = listState.canScrollBackward),
-                state = listState,
-                contentPadding = PaddingValues(top = inset, bottom = 20.dp),
-                verticalArrangement = Arrangement.spacedBy(5.dp),
-            ) {
-                if (apps == null) item("loading") {
-                    Box(Modifier.fillMaxWidth().padding(top = 20.dp), contentAlignment = Alignment.Center) { LoadingIndicator() }
-                } else if (selectedApps.isEmpty() && otherApps.isEmpty()) item("empty") {
-                    EmptyMessage(R.string.flow_no_apps)
-                }
-                val appRow: @Composable LazyItemScope.(AppInfo) -> Unit = { app ->
-                    val mark = app.packageName in selectedPackages
-                    val radius = flowChoiceRadius(mark, 12.dp, 25.dp)
-                    val interaction = remember { MutableInteractionSource() }
-                    val icon = remember(app) { app.appIcon.toBitmap(width = 104, height = 104).asImageBitmap() }
-                    Row(
-                        Modifier.animateItem(placementSpec = MaterialTheme.motionScheme.defaultSpatialSpec())
-                            .fillMaxWidth().heightIn(min = 64.dp).flowPress(interaction)
-                            .clip(RoundedCornerShape(radius))
-                            .background(if (mark) colors.secondaryContainer else colors.surfaceContainer)
-                            .toggleable(mark, interaction, ripple(), role = Role.Checkbox) { picked ->
-                                selected = ArrayList(if (picked) selectedPackages + app.packageName else selectedPackages - app.packageName)
-                            }.padding(horizontal = 12.dp, vertical = 7.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Image(icon, contentDescription = null, modifier = Modifier.size(40.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(app.appName, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                            Text(app.packageName, style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant,
-                                maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
-                        val checkColor by animateColorAsState(if (mark) colors.primary else colors.surfaceContainerHighest,
-                            MaterialTheme.motionScheme.fastEffectsSpec(), label = "app selected")
-                        Box(Modifier.size(32.dp).clip(RoundedCornerShape(10.dp)).background(checkColor),
-                            contentAlignment = Alignment.Center) {
-                            val check by animateFloatAsState(if (mark) 1f else 0f,
-                                MaterialTheme.motionScheme.fastSpatialSpec(), label = "app checkmark")
-                            Box(Modifier.graphicsLayer {
-                                alpha = check.coerceIn(0f, 1f)
-                                scaleX = .55f + alpha * .45f
-                                scaleY = scaleX
-                            }) {
-                                FlowIcon(R.drawable.flow_status_on, 16.dp, colors.onPrimary)
-                            }
-                        }
-                    }
-                }
-                items(selectedApps, key = AppInfo::packageName, itemContent = appRow)
-                if (selectedApps.isNotEmpty() && otherApps.isNotEmpty()) item("routing-divider") {
-                    HorizontalDivider(Modifier.fillMaxWidth().padding(vertical = 8.dp), color = colors.outlineVariant)
-                }
-                items(otherApps, key = AppInfo::packageName, itemContent = appRow)
+        AnimatedVisibility(
+            visible = pickerVisible,
+            modifier = Modifier.weight(1f),
+            enter = fadeIn(motion.fastEffectsSpec()),
+            exit = fadeOut(motion.fastEffectsSpec()),
+        ) {
+            pickerState.SaveableStateProvider("app-picker") {
+                val selectedPackages = remember(selected) { selected.toSet() }
+                AppRoutingPicker(apps, selectedPackages) { selected = ArrayList(it) }
             }
-            Column(Modifier.fillMaxWidth().onSizeChanged { controlsHeight = it.height }.padding(bottom = 22.dp)) {
-                FlowSearchField(query, { query = it }, R.string.flow_find_app)
-                val systemLabel = stringResource(if (includeSystem) R.string.flow_show_user_apps else R.string.flow_show_system_apps)
-                val systemFill by animateColorAsState(if (includeSystem) colors.secondaryContainer else colors.surfaceContainerHigh,
-                    MaterialTheme.motionScheme.defaultEffectsSpec(), label = "system apps toggle color")
-                FilledTonalButton(
-                    onClick = { includeSystem = !includeSystem },
-                    modifier = Modifier.fillMaxWidth().padding(top = 5.dp).semantics { contentDescription = systemLabel },
-                    shapes = ButtonDefaults.shapes(RoundedCornerShape(17.dp), RoundedCornerShape(10.dp)),
-                    colors = ButtonDefaults.filledTonalButtonColors(
-                        containerColor = systemFill,
-                        contentColor = if (includeSystem) colors.onSecondaryContainer else colors.onSurfaceVariant,
-                    ),
+        }
+    }
+}
+
+@Composable
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+private fun AppRoutingPicker(
+    apps: List<AppInfo>?,
+    selectedPackages: Set<String>,
+    onSelectionChange: (Set<String>) -> Unit,
+) {
+    val colors = MaterialTheme.colorScheme
+    val motion = MaterialTheme.motionScheme
+    var includeSystem by rememberSaveable { mutableStateOf(false) }
+    var query by rememberSaveable { mutableStateOf("") }
+    val listState = rememberLazyListState()
+    val (selectedApps, otherApps) = remember(query, includeSystem, apps, selectedPackages) {
+        val text = query.trim()
+        apps.orEmpty().filter { app ->
+            (includeSystem || !app.isSystemApp || app.packageName in selectedPackages) &&
+                (app.appName.contains(text, true) || app.packageName.contains(text, true))
+        }.partition { it.packageName in selectedPackages }
+    }
+    val russianApps = remember(apps) {
+        apps.orEmpty().map(AppInfo::packageName).filter { it in russianServicePackages }.toSet()
+    }
+    val russianAppsSelected = russianApps.isNotEmpty() && selectedPackages.containsAll(russianApps)
+    fun updateSelection(packages: Set<String>) {
+        // Preserve the viewport when its first visible package moves to the other section.
+        listState.requestScrollToItem(listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
+        onSelectionChange(packages)
+    }
+
+    Column(Modifier.fillMaxSize().padding(top = 14.dp)) {
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            FlowSearchField(query, { query = it }, R.string.flow_find_app)
+            RoutingToggleButton(
+                active = includeSystem,
+                inactiveLabel = R.string.flow_show_system_apps,
+                activeLabel = R.string.flow_show_user_apps,
+                icon = R.drawable.flow_android,
+                modifier = Modifier.fillMaxWidth(),
+                onClick = { includeSystem = !includeSystem },
+            )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                RoutingToggleButton(
+                    active = russianAppsSelected,
+                    inactiveLabel = R.string.flow_add_russian_apps,
+                    activeLabel = R.string.flow_remove_russian_apps,
+                    icon = R.drawable.flow_add,
+                    activeIcon = R.drawable.flow_status_on,
+                    modifier = Modifier.weight(1f),
+                    enabled = russianApps.isNotEmpty(),
+                    onClick = {
+                        updateSelection(if (russianAppsSelected) selectedPackages - russianApps else selectedPackages + russianApps)
+                    },
+                )
+                ActionSquare(R.drawable.ic_restore_24dp, R.string.flow_reset_selected_apps, 44.dp,
+                    colors.surfaceContainerHigh, colors.onSurfaceVariant, { updateSelection(emptySet()) },
+                    enabled = selectedPackages.isNotEmpty())
+            }
+        }
+        LazyColumn(
+            Modifier.weight(1f).fillMaxWidth().clipToBounds()
+                .flowHeaderFade(14.dp, 14.dp, visible = listState.canScrollBackward),
+            state = listState,
+            contentPadding = PaddingValues(top = 8.dp, bottom = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp),
+        ) {
+            if (apps == null) item("loading") {
+                Box(Modifier.fillMaxWidth().padding(top = 20.dp), contentAlignment = Alignment.Center) { LoadingIndicator() }
+            } else if (selectedApps.isEmpty() && otherApps.isEmpty()) item("empty") {
+                EmptyMessage(R.string.flow_no_apps)
+            }
+            val appRow: @Composable LazyItemScope.(AppInfo) -> Unit = { app ->
+                val mark = app.packageName in selectedPackages
+                val radius = flowChoiceRadius(mark, 12.dp, 25.dp)
+                val interaction = remember { MutableInteractionSource() }
+                val icon = remember(app) { app.appIcon.toBitmap(width = 104, height = 104).asImageBitmap() }
+                Row(
+                    Modifier.animateItem(
+                        fadeInSpec = motion.fastEffectsSpec(),
+                        placementSpec = motion.fastSpatialSpec(),
+                        fadeOutSpec = motion.fastEffectsSpec(),
+                    )
+                        .fillMaxWidth().heightIn(min = 64.dp).flowPress(interaction)
+                        .clip(RoundedCornerShape(radius))
+                        .background(if (mark) colors.secondaryContainer else colors.surfaceContainer)
+                        .toggleable(mark, interaction, ripple(), role = Role.Checkbox) { picked ->
+                            updateSelection(if (picked) selectedPackages + app.packageName else selectedPackages - app.packageName)
+                        }.padding(horizontal = 12.dp, vertical = 7.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    FlowIcon(R.drawable.flow_android, 18.dp, LocalContentColor.current)
-                    Spacer(Modifier.width(8.dp))
-                    FlowToggleContent(includeSystem, Modifier.clearAndSetSemantics {}, label = "system apps label") {
-                        Text(stringResource(if (it) R.string.flow_show_user_apps else R.string.flow_show_system_apps))
+                    Image(icon, contentDescription = null, modifier = Modifier.size(40.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(app.appName, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text(app.packageName, style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    val checkColor by animateColorAsState(if (mark) colors.primary else colors.surfaceContainerHighest,
+                        MaterialTheme.motionScheme.fastEffectsSpec(), label = "app selected")
+                    Box(Modifier.size(32.dp).clip(RoundedCornerShape(10.dp)).background(checkColor),
+                        contentAlignment = Alignment.Center) {
+                        val check by animateFloatAsState(if (mark) 1f else 0f,
+                            MaterialTheme.motionScheme.fastSpatialSpec(), label = "app checkmark")
+                        Box(Modifier.graphicsLayer {
+                            alpha = check.coerceIn(0f, 1f)
+                            scaleX = .55f + alpha * .45f
+                            scaleY = scaleX
+                        }) {
+                            FlowIcon(R.drawable.flow_status_on, 16.dp, colors.onPrimary)
+                        }
                     }
                 }
-                FilledTonalButton(
-                    onClick = {
-                        selected = ArrayList(selectedPackages + unselectedRussianApps)
-                        if (query.isNotEmpty()) query = ""
-                        listState.requestScrollToItem(0)
-                    },
-                    enabled = unselectedRussianApps.isNotEmpty(),
-                    modifier = Modifier.fillMaxWidth(),
-                    shapes = ButtonDefaults.shapes(RoundedCornerShape(17.dp), RoundedCornerShape(10.dp)),
-                ) {
-                    FlowIcon(R.drawable.flow_add, 18.dp, LocalContentColor.current)
-                    Spacer(Modifier.width(8.dp))
-                    Text(stringResource(R.string.flow_add_russian_apps))
-                }
+            }
+            items(selectedApps, key = AppInfo::packageName, itemContent = appRow)
+            if (selectedApps.isNotEmpty() && otherApps.isNotEmpty()) item("routing-divider") {
+                HorizontalDivider(Modifier.animateItem(placementSpec = motion.fastSpatialSpec())
+                    .fillMaxWidth().padding(vertical = 8.dp), color = colors.outlineVariant)
+            }
+            items(otherApps, key = AppInfo::packageName, itemContent = appRow)
+        }
+    }
+}
+
+@Composable
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+private fun RoutingToggleButton(
+    active: Boolean,
+    inactiveLabel: Int,
+    activeLabel: Int,
+    icon: Int,
+    modifier: Modifier = Modifier,
+    activeIcon: Int = icon,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
+    val colors = MaterialTheme.colorScheme
+    val motion = MaterialTheme.motionScheme
+    val radius = flowChoiceRadius(active, 15.dp, 24.dp)
+    val fill by animateColorAsState(if (active) colors.primaryContainer else colors.surfaceContainerHigh,
+        motion.fastEffectsSpec(), label = "routing toggle fill")
+    val ink by animateColorAsState(if (active) colors.onPrimaryContainer else colors.onSurfaceVariant,
+        motion.fastEffectsSpec(), label = "routing toggle ink")
+    val label = stringResource(if (active) activeLabel else inactiveLabel)
+    FilledTonalButton(
+        onClick = onClick,
+        modifier = modifier.semantics { contentDescription = label; selected = active },
+        enabled = enabled,
+        shapes = ButtonDefaults.shapes(RoundedCornerShape(radius), RoundedCornerShape(9.dp)),
+        colors = ButtonDefaults.filledTonalButtonColors(containerColor = fill, contentColor = ink),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+    ) {
+        FlowToggleContent(active, Modifier.clearAndSetSemantics {}, label = "routing toggle label") { checked ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                FlowIcon(if (checked) activeIcon else icon, 18.dp, LocalContentColor.current)
+                Text(stringResource(if (checked) activeLabel else inactiveLabel), textAlign = TextAlign.Center)
             }
         }
     }
