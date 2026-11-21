@@ -33,6 +33,8 @@ import com.v2ray.ang.handler.FlowPreferences
 import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.SettingsChangeManager
 import com.v2ray.ang.handler.SettingsManager
+import com.v2ray.ang.util.JsonUtil
+import com.v2ray.ang.util.serverDescription
 import com.v2ray.ang.handler.SubscriptionUpdater
 import com.v2ray.ang.handler.WebDavManager
 import com.v2ray.ang.ui.BaseActivity
@@ -333,7 +335,9 @@ class FlowActivity : BaseActivity() {
 
     internal fun saveProfile(server: FlowServer, profile: ProfileItem, raw: String?) = runTask {
         if (raw != null) MmkvManager.encodeServerRaw(server.id, raw)
-        MmkvManager.encodeServerConfig(server.id, profile)
+        MmkvManager.encodeServerConfig(server.id, if (raw == null) profile else profile.copy(
+            serverDescription = JsonUtil.parseString(raw)?.serverDescription(),
+        ))
         FlowPreferences.migrateProfilePreferences(mapOf(server.preferenceKey to FlowPreferences.profileKey(server.id, profile)))
         getString(R.string.toast_success)
     }

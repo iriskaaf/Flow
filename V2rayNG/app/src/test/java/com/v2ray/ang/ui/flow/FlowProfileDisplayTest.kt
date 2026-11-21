@@ -9,10 +9,10 @@ import org.junit.Test
 
 class FlowProfileDisplayTest {
     @Test
-    fun `custom profiles display distinct proxy protocols`() {
-        val config = """{"outbounds":[{"protocol":"freedom"},{"protocol":"vless"},{"protocol":"trojan"},{"protocol":"VLESS"}]}"""
+    fun `custom profiles display the tagged primary proxy instead of listing every transport`() {
+        val config = """{"outbounds":[{"protocol":"freedom"},{"protocol":"trojan"},{"protocol":"vless","tag":"proxy"},{"protocol":"VLESS"}]}"""
 
-        assertEquals("VLESS · TROJAN", customServerDetails(config).protocol)
+        assertEquals("VLESS", customServerDetails(config).protocol)
         assertEquals("FREEDOM", customServerDetails("""{"outbounds":[{"protocol":"freedom"}]}""").protocol)
         assertEquals("", customServerDetails("""{"outbounds":[null,{"protocol":42}]}""").protocol)
     }
@@ -31,11 +31,12 @@ class FlowProfileDisplayTest {
         """.trimIndent()
         val details = customServerDetails(config)
         assertEquals("Пусть работает боже 🙏", details.description)
-        assertEquals("VLESS gRPC Reality · VLESS XHTTP TLS", details.protocol)
+        assertEquals("VLESS gRPC Reality", details.protocol)
         assertEquals("VMESS WS TLS", connectionDetails("vmess", "ws", "tls"))
         assertEquals("VLESS TCP", connectionDetails("vless", "raw", "none"))
         assertNull(customServerDetails("""{"meta":{"serverDescription":" "}}""").description)
         assertNull(customServerDetails("""{"meta":{"serverDescription":42}}""").description)
+        assertEquals("Строка вторая", customServerDetails("""{"serverDescription":"Строка\nвторая"}""").description)
     }
 
     @Test

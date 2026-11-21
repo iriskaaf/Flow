@@ -370,6 +370,7 @@ private fun AboutPage(back: () -> Unit) {
             Text("Flow", style = MaterialTheme.typography.headlineLarge)
             Text(stringResource(R.string.flow_app_version, BuildConfig.VERSION_NAME), color = colors.onSurfaceVariant)
             Text(stringResource(R.string.flow_developer, "iriskaaf"), style = MaterialTheme.typography.titleMedium)
+            FlowUpdatePanel()
             Text(stringResource(R.string.flow_components), Modifier.fillMaxWidth().padding(top = 12.dp),
                 style = MaterialTheme.typography.titleMedium)
             val components = listOf(

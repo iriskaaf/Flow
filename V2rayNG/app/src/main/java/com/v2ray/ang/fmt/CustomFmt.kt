@@ -4,6 +4,7 @@ import com.v2ray.ang.dto.entities.ProfileItem
 import com.v2ray.ang.dto.V2rayConfig
 import com.v2ray.ang.enums.EConfigType
 import com.v2ray.ang.util.JsonUtil
+import com.v2ray.ang.util.serverDescription
 
 object CustomFmt : FmtBase() {
     /**
@@ -21,6 +22,7 @@ object CustomFmt : FmtBase() {
         config.remarks = fullConfig?.remarks ?: System.currentTimeMillis().toString()
         config.server = outbound?.getServerAddress()
         config.serverPort = outbound?.getServerPort()?.toString()
+        config.serverDescription = JsonUtil.parseString(str)?.serverDescription()
 
         return config
     }

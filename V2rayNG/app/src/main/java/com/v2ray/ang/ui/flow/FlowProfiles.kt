@@ -1,6 +1,5 @@
 package com.v2ray.ang.ui.flow
 
-import com.google.gson.JsonObject
 import com.v2ray.ang.dto.entities.ProfileItem
 import com.v2ray.ang.dto.entities.SubscriptionCache
 import com.v2ray.ang.enums.EConfigType
@@ -9,6 +8,9 @@ import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.subscriptionDivider
 import com.v2ray.ang.util.JsonUtil
 import com.v2ray.ang.util.SubscriptionTitle
+import com.v2ray.ang.util.objectField
+import com.v2ray.ang.util.serverDescription
+import com.v2ray.ang.util.stringField
 import java.util.Locale
 
 internal data class FlowServer(
@@ -33,13 +35,6 @@ private val nonProxyOutbounds = setOf("freedom", "blackhole", "dns", "loopback",
 
 internal data class ServerDisplayDetails(val protocol: String, val description: String? = null)
 
-private fun JsonObject.text(name: String): String? = get(name)
-    ?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isString }
-    ?.asString?.trim()?.takeIf(String::isNotEmpty)
-
-private fun JsonObject.objectField(name: String): JsonObject? =
-    get(name)?.takeIf { it.isJsonObject }?.asJsonObject
-
 internal fun connectionDetails(protocol: String, network: String?, security: String?): String {
     val transport = when (val value = network?.trim()?.lowercase(Locale.ROOT)) {
         null, "", "none" -> null
@@ -60,16 +55,18 @@ internal fun connectionDetails(protocol: String, network: String?, security: Str
 internal fun customServerDetails(raw: String?): ServerDisplayDetails {
     val configuration = raw?.let { runCatching { JsonUtil.parseString(it) }.getOrNull() }
         ?.takeIf { it.isJsonObject }?.asJsonObject
-    val description = configuration?.objectField("meta")?.text("serverDescription")
+    val description = configuration?.serverDescription()
     val outbounds = configuration?.get("outbounds")?.takeIf { it.isJsonArray }?.asJsonArray
-    val protocols = outbounds?.mapNotNull { outbound ->
-        val item = outbound.takeIf { it.isJsonObject }?.asJsonObject ?: return@mapNotNull null
-        val protocol = item.text("protocol")?.lowercase(Locale.ROOT) ?: return@mapNotNull null
-        val transport = item.objectField("streamSettings")
-        protocol to connectionDetails(protocol, transport?.text("network"), transport?.text("security"))
+    val configured = outbounds?.mapNotNull { it.takeIf { it.isJsonObject }?.asJsonObject }
+        .orEmpty().filter { it.stringField("protocol") != null }
+    val routes = configured.filterNot { it.stringField("protocol")?.lowercase(Locale.ROOT) in nonProxyOutbounds }
+        .ifEmpty { configured }
+    val primary = routes.firstOrNull { it.stringField("tag").equals("proxy", ignoreCase = true) } ?: routes.firstOrNull()
+    val stream = primary?.objectField("streamSettings")
+    val protocol = primary?.stringField("protocol")?.let {
+        connectionDetails(it, stream?.stringField("network"), stream?.stringField("security"))
     }.orEmpty()
-    val preferred = protocols.filterNot { (protocol, _) -> protocol in nonProxyOutbounds }.ifEmpty { protocols }
-    return ServerDisplayDetails(preferred.map { it.second }.distinct().joinToString(" · "), description)
+    return ServerDisplayDetails(protocol, description)
 }
 
 internal data class FlowGroup(val subscription: SubscriptionCache?, val servers: List<FlowServer>) {
@@ -134,7 +131,7 @@ internal data class FlowProfiles(
                     MmkvManager.decodeServerAffiliationInfo(id)?.testDelayMillis ?: 0L,
                     protocol = details.protocol,
                     sectionLabel = FlowPreferences.dividerLabel(profile, automaticDividers, overrides[key]),
-                    serverDescription = details.description,
+                    serverDescription = details.description ?: profile.serverDescription,
                 )
             }.groupBy { it.profile.subscriptionId }
             val subscriptionIds = knownGroups.map { it.guid }.toSet()

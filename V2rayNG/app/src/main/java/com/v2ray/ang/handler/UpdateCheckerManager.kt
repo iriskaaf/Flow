@@ -88,6 +88,9 @@ object UpdateCheckerManager {
     }
 
     private fun getDownloadUrl(release: GitHubRelease, abi: String): String {
+        if (BuildConfig.APPLICATION_ID == "app.flowvpn.client") {
+            release.assets.firstOrNull { it.name == "Flow.apk" }?.let { return it.browserDownloadUrl }
+        }
         val fDroid = "fdroid"
 
         val assetsByAbi = release.assets.filter {

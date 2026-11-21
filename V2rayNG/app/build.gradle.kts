@@ -13,8 +13,8 @@ android {
         applicationId = "app.flowvpn.client"
         minSdk = 24
         targetSdk = 36
-        versionCode = 7
-        versionName = "1.6.0"
+        versionCode = 8
+        versionName = "1.7.0"
         multiDexEnabled = true
         manifestPlaceholders["xiaomiIslandAppId"] = providers.gradleProperty("flowXiaomiAppId").orElse("").get()
         manifestPlaceholders["xiaomiIslandBusiness"] = providers.gradleProperty("flowXiaomiBusiness").orElse("").get()

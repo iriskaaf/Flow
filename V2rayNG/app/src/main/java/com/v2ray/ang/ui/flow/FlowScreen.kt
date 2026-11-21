@@ -281,6 +281,7 @@ internal fun FlowScreen(
                                                 pinging = pinging,
                                                 pingTarget = actions.pingTarget,
                                                 add = { dialog = FlowDialog.ADD },
+                                                reorder = { dialog = FlowDialog.REORDER },
                                                 select = { actions.chooseServer(it) },
                                                 details = ::showDetails,
                                                 favorite = actions::favorite,
@@ -476,12 +477,12 @@ internal fun FlowServer.protocolLabel(): String = serverDescription ?: when (pro
 }
 
 @Composable
-internal fun Latency(delay: Long, active: Boolean) {
+internal fun Latency(delay: Long, active: Boolean, compact: Boolean = false) {
     val colors = MaterialTheme.colorScheme
     val motion = MaterialTheme.motionScheme
     AnimatedContent(
         targetState = delay,
-        modifier = Modifier.heightIn(min = 20.dp),
+        modifier = Modifier.heightIn(min = if (compact) 16.dp else 20.dp),
         contentAlignment = Alignment.CenterEnd,
         transitionSpec = {
             fadeIn(motion.fastEffectsSpec()).togetherWith(fadeOut(motion.fastEffectsSpec()))
@@ -502,7 +503,9 @@ internal fun Latency(delay: Long, active: Boolean) {
                 result < 0L -> stringResource(R.string.flow_no_response)
                 else -> stringResource(R.string.flow_ms, result)
             }
-            Text(label, color = color, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+            Text(label, color = color, fontSize = 13.sp, lineHeight = 16.sp,
+                fontWeight = if (compact) FontWeight.Medium else FontWeight.SemiBold,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }

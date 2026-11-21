@@ -3,6 +3,7 @@ package com.v2ray.ang.handler
 import android.content.Context
 import android.graphics.Bitmap
 import android.text.TextUtils
+import com.google.gson.JsonParser
 import com.v2ray.ang.AngApplication
 import com.v2ray.ang.AppConfig
 import com.v2ray.ang.R
@@ -391,48 +392,36 @@ object AngConfigManager {
         if (server == null) {
             return 0
         }
-        if (server.contains("inbounds")
-            && server.contains("outbounds")
-            && server.contains("routing")
-        ) {
-            try {
-                val serverList: Array<Any> =
-                    JsonUtil.fromJson(server, Array<Any>::class.java) ?: arrayOf()
-
-                if (serverList.isNotEmpty()) {
-                    if (!append) {
-                        MmkvManager.removeServerViaSubid(subid)
-                    }
-                    var count = 0
-                    for (srv in serverList.reversed()) {
-                        val config = CustomFmt.parse(JsonUtil.toJson(srv)) ?: continue
-                        config.subscriptionId = subid
-                        config.description = generateDescription(config)
-                        val key = MmkvManager.encodeServerConfig("", config)
-                        MmkvManager.encodeServerRaw(key, JsonUtil.toJsonPretty(srv) ?: "")
-                        count += 1
-                    }
-                    return count
-                }
+        val trimmed = server.trim().trimStart('\uFEFF')
+        if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+            val root = try {
+                JsonParser.parseString(trimmed)
             } catch (e: Exception) {
-                LogUtil.e(AppConfig.TAG, "Failed to parse custom config server JSON array", e)
+                LogUtil.e(AppConfig.TAG, "Failed to parse custom configuration JSON", e)
+                return 0
             }
-
-            try {
-                // For compatibility
-                val config = CustomFmt.parse(server) ?: return 0
-                config.subscriptionId = subid
-                config.description = generateDescription(config)
-                if (!append) {
-                    MmkvManager.removeServerViaSubid(subid)
+            val entries = if (root.isJsonArray) root.asJsonArray.toList() else listOf(root)
+            val profiles = entries.mapNotNull { entry ->
+                val obj = entry.takeIf { it.isJsonObject }?.asJsonObject ?: return@mapNotNull null
+                if (obj.get("outbounds")?.isJsonArray != true) return@mapNotNull null
+                val raw = JsonUtil.toJsonPretty(obj) ?: return@mapNotNull null
+                try {
+                    val profile = CustomFmt.parse(raw)
+                    profile.subscriptionId = subid
+                    profile.description = generateDescription(profile)
+                    profile to raw
+                } catch (e: Exception) {
+                    LogUtil.e(AppConfig.TAG, "Failed to parse a custom server profile", e)
+                    null
                 }
-                val key = MmkvManager.encodeServerConfig("", config)
-                MmkvManager.encodeServerRaw(key, server)
-                return 1
-            } catch (e: Exception) {
-                LogUtil.e(AppConfig.TAG, "Failed to parse custom config server as single config", e)
             }
-            return 0
+            if (profiles.isEmpty()) return 0
+            if (!append) MmkvManager.removeServerViaSubid(subid)
+            for ((profile, raw) in profiles.asReversed()) {
+                val key = MmkvManager.encodeServerConfig("", profile)
+                MmkvManager.encodeServerRaw(key, raw)
+            }
+            return profiles.size
         } else if (server.startsWith("[Interface]") && server.contains("[Peer]")) {
             try {
                 val config = WireguardFmt.parseWireguardConfFile(server) ?: return R.string.toast_incorrect_protocol
@@ -644,13 +633,19 @@ object AngConfigManager {
      */
     private fun parseConfigViaSub(server: String?, subid: String, append: Boolean): Int {
         if (server.isNullOrBlank()) return 0
-        val prefix = server.firstOrNull { !it.isWhitespace() }
-        if (prefix != '{' && prefix != '[' && !server.contains("://")) {
-            val decodedCount = parseBatchConfig(Utils.decode(server), subid, append)
+        val payload = server.trim().trimStart('\uFEFF')
+        val prefix = payload.firstOrNull()
+        if (prefix == '{' || prefix == '[') return parseCustomConfigServer(payload, subid, append)
+        if (!payload.contains("://")) {
+            val decoded = Utils.decode(payload).trim().trimStart('\uFEFF')
+            if (decoded.startsWith('{') || decoded.startsWith('[')) {
+                return parseCustomConfigServer(decoded, subid, append)
+            }
+            val decodedCount = parseBatchConfig(decoded, subid, append)
             if (decodedCount > 0) return decodedCount
         }
-        val count = parseBatchConfig(server, subid, append)
-        return if (count > 0) count else parseCustomConfigServer(server, subid, append)
+        val count = parseBatchConfig(payload, subid, append)
+        return if (count > 0) count else parseCustomConfigServer(payload, subid, append)
     }
 
     /**

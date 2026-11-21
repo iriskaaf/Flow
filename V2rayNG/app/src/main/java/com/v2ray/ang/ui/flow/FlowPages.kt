@@ -6,6 +6,7 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -95,6 +96,7 @@ internal fun ServersPage(
     pinging: Boolean,
     pingTarget: String?,
     add: () -> Unit,
+    reorder: () -> Unit,
     select: (String) -> Unit,
     details: (FlowServer) -> Unit,
     favorite: (FlowServer) -> Unit,
@@ -106,7 +108,10 @@ internal fun ServersPage(
     val motion = MaterialTheme.motionScheme
     val density = LocalDensity.current
     val keyword = search.trim()
-    val listState = rememberLazyListState()
+    val gridState = rememberLazyListState()
+    val linearState = rememberLazyListState()
+    var listView by remember { mutableStateOf(MmkvManager.decodeSettingsBool(FlowPreferences.SERVER_LIST_VIEW)) }
+    val listState = if (listView) linearState else gridState
     val refreshState = rememberPullToRefreshState()
     val scope = rememberCoroutineScope()
     val changing = remember { mutableStateMapOf<String, Animatable<Float, AnimationVector1D>>() }
@@ -120,7 +125,6 @@ internal fun ServersPage(
     val headerBottomPadding by animateDpAsState(if (atTop) 4.dp else 28.dp, motion.fastSpatialSpec(),
         label = "server header spacing")
     var collapsed by rememberSaveable { mutableStateOf(arrayListOf<String>()) }
-    var listView by remember { mutableStateOf(MmkvManager.decodeSettingsBool(FlowPreferences.SERVER_LIST_VIEW)) }
     val filtered by produceState(keyword to profiles.groups, profiles.groups, keyword, sorted) {
         val matches = withContext(Dispatchers.Default) {
             if (keyword.isEmpty() && !sorted) return@withContext profiles.groups
@@ -154,7 +158,6 @@ internal fun ServersPage(
         previousOrder = groupOrder
     }
     val fullGroups = remember(profiles.groups) { profiles.groups.associateBy(FlowGroup::id) }
-    val rows = remember(groups, listView) { groups.associate { it.id to it.servers.sectionRows(if (listView) 1 else 2) } }
 
     PullToRefreshBox(
         isRefreshing = pinging && pingTarget == null,
@@ -168,72 +171,88 @@ internal fun ServersPage(
         },
         modifier = modifier.fillMaxSize(),
     ) {
-        LazyColumn(
-            Modifier.fillMaxSize().flowHeaderFade(topInset, 40.dp, visible = !atTop), state = listState,
-            contentPadding = PaddingValues(top = topInset, bottom = bottomInset),
-        ) {
-            if (groups.isEmpty()) item("empty") {
-                EmptyMessage(if (keyword.isEmpty()) R.string.flow_no_servers else R.string.flow_no_matches,
-                    if (keyword.isEmpty()) add else null)
+        AnimatedContent(
+            targetState = listView,
+            modifier = Modifier.fillMaxSize().flowHeaderFade(topInset, 40.dp, visible = !atTop),
+            transitionSpec = {
+                (fadeIn(motion.defaultEffectsSpec()) + scaleIn(motion.defaultSpatialSpec(), initialScale = .965f))
+                    .togetherWith(fadeOut(motion.fastEffectsSpec()) +
+                        scaleOut(motion.fastSpatialSpec(), targetScale = .985f))
+                    .using(SizeTransform(clip = false))
+            },
+            label = "server layout transition",
+        ) { linear ->
+            val rows = remember(groups, linear) {
+                groups.associate { it.id to it.servers.sectionRows(if (linear) 1 else 2) }
             }
-            for (group in groups) {
-                val expanded = group.id !in collapsed || keyword.isNotEmpty()
-                val animation = changing[group.id]?.takeIf { keyword.isEmpty() }
-                val groupRows = rows[group.id].orEmpty()
-                // The transition only needs the rows that can reach the viewport.
-                val visibleRows = if (animation != null) groupRows.take(revealRowLimit) else groupRows
-                item(key = "header:${group.id}", contentType = "header") {
-                    SubscriptionHeader(
-                        group, expanded, groupRows.isNotEmpty(), animation, working, keyword.isNotEmpty(),
-                        loading = pinging && (pingTarget == null || pingTarget == group.id),
-                        refresh = { refresh(group) },
-                        toggle = {
-                            val progress = changing[group.id]
-                                ?: Animatable(if (expanded) 1f else 0f).also { changing[group.id] = it }
-                            collapsed = ArrayList(if (expanded) collapsed + group.id else collapsed.filterNot { it == group.id })
-                            scope.launch {
-                                progress.animateTo(if (expanded) 0f else 1f, motion.defaultSpatialSpec())
-                                if (changing[group.id] === progress) changing.remove(group.id)
-                            }
-                        },
-                        ping = { ping(fullGroups[group.id]?.servers.orEmpty().filter { it.sectionLabel == null }.map(FlowServer::id), group.id) },
-                        edit = { subscriptionOptions(group) },
-                        modifier = Modifier.padding(top = 8.dp),
-                    )
+            LazyColumn(
+                modifier = Modifier.fillMaxSize().then(if (linear != listView) Modifier.clearAndSetSemantics {} else Modifier),
+                state = if (linear) linearState else gridState,
+                contentPadding = PaddingValues(top = topInset, bottom = bottomInset),
+            ) {
+                if (groups.isEmpty()) item("empty") {
+                    EmptyMessage(if (keyword.isEmpty()) R.string.flow_no_servers else R.string.flow_no_matches,
+                        if (keyword.isEmpty()) add else null)
                 }
-                if (expanded || animation != null) {
-                    itemsIndexed(
-                        visibleRows,
-                        key = { _, row -> "${group.id}:${row.first().id}" },
-                        contentType = { _, _ -> "server-row" },
-                    ) { index, row ->
-                        val shape = if (index == groupRows.lastIndex) {
-                            RoundedCornerShape(bottomStart = 22.dp, bottomEnd = 22.dp)
-                        } else RoundedCornerShape(0.dp)
-                        val reveal = if (animation == null) Modifier else Modifier.clipToBounds().layout { measurable, constraints ->
-                            val child = measurable.measure(constraints)
-                            val amount = animation.value.coerceIn(0f, 1f)
-                            val height = (child.height * amount).roundToInt()
-                            layout(child.width, height) {
-                                child.placeRelativeWithLayer(0, ((height - child.height) * .3f).roundToInt()) {
-                                    alpha = amount
+                for (group in groups) {
+                    val expanded = group.id !in collapsed || keyword.isNotEmpty()
+                    val animation = changing[group.id]?.takeIf { keyword.isEmpty() }
+                    val groupRows = rows[group.id].orEmpty()
+                    // The transition only needs the rows that can reach the viewport.
+                    val visibleRows = if (animation != null) groupRows.take(revealRowLimit) else groupRows
+                    item(key = "header:${group.id}", contentType = "header") {
+                        SubscriptionHeader(
+                            group, expanded, groupRows.isNotEmpty(), animation, working, keyword.isNotEmpty(),
+                            loading = pinging && (pingTarget == null || pingTarget == group.id),
+                            refresh = { refresh(group) },
+                            toggle = {
+                                val progress = changing[group.id]
+                                    ?: Animatable(if (expanded) 1f else 0f).also { changing[group.id] = it }
+                                collapsed = ArrayList(if (expanded) collapsed + group.id else collapsed.filterNot { it == group.id })
+                                scope.launch {
+                                    progress.animateTo(if (expanded) 0f else 1f, motion.defaultSpatialSpec())
+                                    if (changing[group.id] === progress) changing.remove(group.id)
+                                }
+                            },
+                            ping = { ping(fullGroups[group.id]?.servers.orEmpty().filter { it.sectionLabel == null }.map(FlowServer::id), group.id) },
+                            edit = { subscriptionOptions(group) },
+                            modifier = Modifier.padding(top = 8.dp),
+                        )
+                    }
+                    if (expanded || animation != null) {
+                        itemsIndexed(
+                            visibleRows,
+                            key = { _, row -> "${group.id}:${row.first().id}" },
+                            contentType = { _, _ -> "server-row" },
+                        ) { index, row ->
+                            val shape = if (index == groupRows.lastIndex) {
+                                RoundedCornerShape(bottomStart = 22.dp, bottomEnd = 22.dp)
+                            } else RoundedCornerShape(0.dp)
+                            val reveal = if (animation == null) Modifier else Modifier.clipToBounds().layout { measurable, constraints ->
+                                val child = measurable.measure(constraints)
+                                val amount = animation.value.coerceIn(0f, 1f)
+                                val height = (child.height * amount).roundToInt()
+                                layout(child.width, height) {
+                                    child.placeRelativeWithLayer(0, ((height - child.height) * .3f).roundToInt()) {
+                                        alpha = amount
+                                    }
                                 }
                             }
-                        }
-                        Row(
-                            reveal.fillMaxWidth().clip(shape).background(colors.surfaceContainerLow)
-                                .padding(start = 14.dp, end = 14.dp, bottom = if (index == groupRows.lastIndex) 10.dp else 7.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            val section = row.first().sectionLabel
-                            if (section != null) {
-                                ServerSection(section) { details(row.first()) }
-                            } else {
-                                for (server in row) {
-                                    ServerCard(Modifier.weight(1f), server, server.id == profiles.selected, listView,
-                                        { select(server.id) }, { details(server) }, { favorite(server) })
+                            Row(
+                                reveal.fillMaxWidth().clip(shape).background(colors.surfaceContainerLow)
+                                    .padding(start = 14.dp, end = 14.dp, bottom = if (index == groupRows.lastIndex) 10.dp else 7.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                val section = row.first().sectionLabel
+                                if (section != null) {
+                                    ServerSection(section) { details(row.first()) }
+                                } else {
+                                    for (server in row) {
+                                        ServerCard(Modifier.weight(1f), server, server.id == profiles.selected, linear,
+                                            { select(server.id) }, { details(server) }, { favorite(server) })
+                                    }
+                                    if (!linear && row.size == 1) Spacer(Modifier.weight(1f))
                                 }
-                                if (!listView && row.size == 1) Spacer(Modifier.weight(1f))
                             }
                         }
                     }
@@ -251,7 +270,8 @@ internal fun ServersPage(
                 ActionSquare(R.drawable.flow_add, R.string.flow_add, 52.dp, colors.primary, colors.onPrimary, add, !working)
             }
             Spacer(Modifier.height(5.dp))
-            ServerSearch(search, searchChanged, atTop, listState.isScrollInProgress, sorted, toggleSort)
+            ServerSearch(search, searchChanged, atTop, listState.isScrollInProgress, sorted, toggleSort,
+                profiles.groups.count { it.subscription != null } > 1, reorder)
             AnimatedVisibility(
                 atTop,
                 enter = expandVertically(motion.defaultSpatialSpec(), expandFrom = Alignment.Top) + fadeIn(motion.fastEffectsSpec()),
@@ -260,9 +280,9 @@ internal fun ServersPage(
                 Box(Modifier.padding(top = 12.dp)) {
                     ServerViewSwitch(listView) { mode ->
                         if (mode != listView) {
+                            (if (mode) linearState else gridState).requestScrollToItem(0)
                             listView = mode
                             MmkvManager.encodeSettings(FlowPreferences.SERVER_LIST_VIEW, mode)
-                            listState.requestScrollToItem(0)
                         }
                     }
                 }
@@ -359,6 +379,7 @@ private fun ServerSection(label: String, options: () -> Unit) {
 private fun ServerSearch(
     search: String, searchChanged: (String) -> Unit, atTop: Boolean, scrolling: Boolean,
     sorted: Boolean, toggleSort: () -> Unit,
+    reorderEnabled: Boolean, reorder: () -> Unit,
 ) {
     val colors = MaterialTheme.colorScheme
     val motion = MaterialTheme.motionScheme
@@ -381,12 +402,14 @@ private fun ServerSearch(
         } else if (!expanded && focused) focus.clearFocus()
     }
 
-    val sortWidth by animateDpAsState(if (atTop) 127.dp else 52.dp, motion.defaultSpatialSpec(), label = "sort width")
+    val expandedSortWidth = if (LocalConfiguration.current.screenWidthDp < 360) 105.dp else 127.dp
+    val sortWidth by animateDpAsState(if (atTop) expandedSortWidth else 52.dp,
+        motion.defaultSpatialSpec(), label = "sort width")
     val sortLabel = stringResource(if (sorted) R.string.flow_by_ping else R.string.flow_by_order)
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
         BoxWithConstraints(Modifier.weight(1f).height(52.dp)) {
             val shape = RoundedCornerShape(18.dp)
-            val hint = stringResource(R.string.flow_search)
+            val hint = stringResource(R.string.flow_server_search)
             val width by animateDpAsState(if (expanded) maxWidth else 52.dp, motion.defaultSpatialSpec(), label = "search width")
             val corner by animateDpAsState(if (expanded) 26.dp else 18.dp, motion.fastSpatialSpec(), label = "search shape")
             val textOpacity by animateFloatAsState(if (expanded) 1f else 0f, motion.fastEffectsSpec(), label = "search text")
@@ -430,10 +453,12 @@ private fun ServerSearch(
                 }
             }
         }
+        ActionSquare(R.drawable.flow_symbol_swap_vert, R.string.flow_reorder_subscriptions, 52.dp,
+            colors.surfaceContainerHigh, colors.onSurfaceVariant, reorder, reorderEnabled)
         val sortInteraction = remember { MutableInteractionSource() }
         val sortPressed by sortInteraction.collectIsPressedAsState()
         val sortRadius by animateDpAsState(
-            if (sortPressed) 12.dp else if (sorted || !atTop) 18.dp else 21.dp,
+            if (sortPressed) 12.dp else if (sorted) 26.dp else 18.dp,
             motion.fastSpatialSpec(), label = "sort shape",
         )
         val sortFill by animateColorAsState(if (sorted) colors.secondaryContainer else colors.surfaceContainerHigh,
@@ -448,9 +473,9 @@ private fun ServerSearch(
                 .clickable(sortInteraction, ripple(), role = Role.Button, onClick = toggleSort),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(Modifier.width(49.dp).fillMaxHeight(), contentAlignment = Alignment.Center) {
+            Box(Modifier.size(52.dp), contentAlignment = Alignment.Center) {
                 FlowToggleContent(sorted, Modifier.size(25.dp), label = "sort icon") { byLatency ->
-                    FlowIcon(if (byLatency) R.drawable.flow_speed else R.drawable.flow_sort, 19.dp, sortInk)
+                    FlowIcon(if (byLatency) R.drawable.flow_sort_latency else R.drawable.flow_sort, 20.dp, sortInk)
                 }
             }
             if (sortWidth > 58.dp) {
@@ -563,18 +588,20 @@ private fun ServerCard(
         .combinedClickable(
             interactionSource = interaction, indication = ripple(), onClick = select, onLongClick = details,
             onLongClickLabel = stringResource(R.string.flow_profile_options),
-        ).padding(horizontal = 12.dp, vertical = 9.dp)
+        ).padding(horizontal = 12.dp, vertical = if (listView) 12.dp else 9.dp)
 
     if (listView) {
         Row(card, horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.width(32.dp), contentAlignment = Alignment.Center) { Flag(server.country, supporting) }
             ServerSummary(server, foreground, supporting, Modifier.weight(1f))
-            Column(horizontalAlignment = Alignment.End) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.width(84.dp), horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Row(Modifier.width(44.dp).height(22.dp), horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.End),
+                    verticalAlignment = Alignment.CenterVertically) {
                     ServerSelectionMark(selected, foreground)
-                    ServerFavorite(server.favorite, supporting, favorite)
+                    ServerFavorite(server.favorite, supporting, favorite, compact = true)
                 }
-                Latency(server.delayMillis, selected)
+                Latency(server.delayMillis, selected, compact = true)
             }
         }
     } else {
@@ -603,7 +630,7 @@ private fun ServerSummary(server: FlowServer, titleColor: Color, subtitleColor: 
         Text(server.name, color = titleColor, fontSize = 16.sp, lineHeight = 20.sp, fontWeight = FontWeight.SemiBold,
             maxLines = 2, overflow = TextOverflow.Ellipsis)
         Text(server.protocolLabel(), color = subtitleColor, fontSize = 11.sp, lineHeight = 14.sp,
-            maxLines = 2, overflow = TextOverflow.Ellipsis)
+            maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -618,14 +645,15 @@ private fun ServerSelectionMark(selected: Boolean, foreground: Color) {
 }
 
 @Composable
-private fun ServerFavorite(marked: Boolean, ink: Color, change: () -> Unit) {
+private fun ServerFavorite(marked: Boolean, ink: Color, change: () -> Unit, compact: Boolean = false) {
     val interaction = remember { MutableInteractionSource() }
     val label = stringResource(if (marked) R.string.flow_favorite_remove else R.string.flow_favorite_add)
     Box(
-        Modifier.size(28.dp, 30.dp).clip(RoundedCornerShape(9.dp)).flowPress(interaction)
+        Modifier.size(if (compact) 24.dp else 28.dp, if (compact) 22.dp else 30.dp)
+            .clip(RoundedCornerShape(9.dp)).flowPress(interaction)
             .semantics { contentDescription = label }
             .toggleable(marked, interaction, ripple(), role = Role.Checkbox) { change() },
-        contentAlignment = Alignment.Center,
+        contentAlignment = if (compact) Alignment.CenterEnd else Alignment.Center,
     ) {
         Crossfade(marked, modifier = Modifier.size(20.dp),
             animationSpec = MaterialTheme.motionScheme.fastEffectsSpec(), label = "favorite star") { favorite ->

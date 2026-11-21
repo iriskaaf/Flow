@@ -11,6 +11,8 @@ data class GitHubRelease(
     val assets: List<Asset>,
     @SerializedName("prerelease")
     val prerelease: Boolean = false,
+    @SerializedName("draft")
+    val draft: Boolean = false,
     @SerializedName("published_at")
     val publishedAt: String = ""
 ) {
@@ -18,6 +20,8 @@ data class GitHubRelease(
         @SerializedName("name")
         val name: String,
         @SerializedName("browser_download_url")
-        val browserDownloadUrl: String
+        val browserDownloadUrl: String,
+        val size: Long = 0L,
+        val digest: String? = null,
     )
 }
