@@ -6,7 +6,7 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -14,6 +14,8 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.expandVertically
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
@@ -29,12 +31,19 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -48,15 +57,16 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -65,6 +75,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
@@ -80,6 +91,7 @@ import kotlinx.coroutines.withContext
 import java.text.DateFormat
 import java.util.Date
 import kotlin.math.roundToInt
+import kotlin.math.abs
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -108,10 +120,10 @@ internal fun ServersPage(
     val motion = MaterialTheme.motionScheme
     val density = LocalDensity.current
     val keyword = search.trim()
-    val gridState = rememberLazyListState()
-    val linearState = rememberLazyListState()
     var listView by remember { mutableStateOf(MmkvManager.decodeSettingsBool(FlowPreferences.SERVER_LIST_VIEW)) }
-    val listState = if (listView) linearState else gridState
+    val listState = rememberLazyGridState()
+    val viewProgress = animateFloatAsState(if (listView) 1f else 0f,
+        motion.defaultSpatialSpec(), label = "server card reflow")
     val refreshState = rememberPullToRefreshState()
     val scope = rememberCoroutineScope()
     val changing = remember { mutableStateMapOf<String, Animatable<Float, AnimationVector1D>>() }
@@ -125,7 +137,7 @@ internal fun ServersPage(
     val headerBottomPadding by animateDpAsState(if (atTop) 4.dp else 28.dp, motion.fastSpatialSpec(),
         label = "server header spacing")
     var collapsed by rememberSaveable { mutableStateOf(arrayListOf<String>()) }
-    val filtered by produceState(keyword to profiles.groups, profiles.groups, keyword, sorted) {
+    val filtered by produceState(Triple(keyword, sorted, profiles.groups), profiles.groups, keyword, sorted) {
         val matches = withContext(Dispatchers.Default) {
             if (keyword.isEmpty() && !sorted) return@withContext profiles.groups
             profiles.groups.mapNotNull { group ->
@@ -139,9 +151,12 @@ internal fun ServersPage(
                 } else matched)
             }
         }
-        value = keyword to matches
+        if (value.second != sorted && value.first == keyword) {
+            listState.requestScrollToItem(listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
+        }
+        value = Triple(keyword, sorted, matches)
     }
-    val (appliedKeyword, groups) = filtered
+    val (appliedKeyword, _, groups) = filtered
     var previousKeyword by rememberSaveable { mutableStateOf(appliedKeyword) }
     LaunchedEffect(appliedKeyword) {
         if (appliedKeyword != previousKeyword) {
@@ -158,6 +173,7 @@ internal fun ServersPage(
         previousOrder = groupOrder
     }
     val fullGroups = remember(profiles.groups) { profiles.groups.associateBy(FlowGroup::id) }
+    val cellsByGroup = remember(groups, listView) { groups.associate { it.id to it.servers.cells(listView) } }
 
     PullToRefreshBox(
         isRefreshing = pinging && pingTarget == null,
@@ -171,94 +187,84 @@ internal fun ServersPage(
         },
         modifier = modifier.fillMaxSize(),
     ) {
-        AnimatedContent(
-            targetState = listView,
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(2),
             modifier = Modifier.fillMaxSize().flowHeaderFade(topInset, 40.dp, visible = !atTop),
-            transitionSpec = {
-                (fadeIn(motion.defaultEffectsSpec()) + scaleIn(motion.defaultSpatialSpec(), initialScale = .965f))
-                    .togetherWith(fadeOut(motion.fastEffectsSpec()) +
-                        scaleOut(motion.fastSpatialSpec(), targetScale = .985f))
-                    .using(SizeTransform(clip = false))
-            },
-            label = "server layout transition",
-        ) { linear ->
-            val rows = remember(groups, linear) {
-                groups.associate { it.id to it.servers.sectionRows(if (linear) 1 else 2) }
+            state = listState,
+            contentPadding = PaddingValues(top = topInset, bottom = bottomInset),
+        ) {
+            if (groups.isEmpty()) item("empty", span = { GridItemSpan(maxLineSpan) }) {
+                EmptyMessage(if (keyword.isEmpty()) R.string.flow_no_servers else R.string.flow_no_matches,
+                    if (keyword.isEmpty()) add else null)
             }
-            LazyColumn(
-                modifier = Modifier.fillMaxSize().then(if (linear != listView) Modifier.clearAndSetSemantics {} else Modifier),
-                state = if (linear) linearState else gridState,
-                contentPadding = PaddingValues(top = topInset, bottom = bottomInset),
-            ) {
-                if (groups.isEmpty()) item("empty") {
-                    EmptyMessage(if (keyword.isEmpty()) R.string.flow_no_servers else R.string.flow_no_matches,
-                        if (keyword.isEmpty()) add else null)
-                }
-                for (group in groups) {
-                    val expanded = group.id !in collapsed || keyword.isNotEmpty()
-                    val animation = changing[group.id]?.takeIf { keyword.isEmpty() }
-                    val groupRows = rows[group.id].orEmpty()
-                    // The transition only needs the rows that can reach the viewport.
-                    val visibleRows = if (animation != null) groupRows.take(revealRowLimit) else groupRows
-                    item(key = "header:${group.id}", contentType = "header") {
-                        SubscriptionHeader(
-                            group, expanded, groupRows.isNotEmpty(), animation, working, keyword.isNotEmpty(),
-                            loading = pinging && (pingTarget == null || pingTarget == group.id),
-                            refresh = { refresh(group) },
-                            toggle = {
-                                val progress = changing[group.id]
-                                    ?: Animatable(if (expanded) 1f else 0f).also { changing[group.id] = it }
-                                collapsed = ArrayList(if (expanded) collapsed + group.id else collapsed.filterNot { it == group.id })
-                                scope.launch {
-                                    progress.animateTo(if (expanded) 0f else 1f, motion.defaultSpatialSpec())
-                                    if (changing[group.id] === progress) changing.remove(group.id)
-                                }
-                            },
-                            ping = { ping(fullGroups[group.id]?.servers.orEmpty().filter { it.sectionLabel == null }.map(FlowServer::id), group.id) },
-                            edit = { subscriptionOptions(group) },
-                            modifier = Modifier.padding(top = 8.dp),
-                        )
-                    }
-                    if (expanded || animation != null) {
-                        itemsIndexed(
-                            visibleRows,
-                            key = { _, row -> "${group.id}:${row.first().id}" },
-                            contentType = { _, _ -> "server-row" },
-                        ) { index, row ->
-                            val shape = if (index == groupRows.lastIndex) {
-                                RoundedCornerShape(bottomStart = 22.dp, bottomEnd = 22.dp)
-                            } else RoundedCornerShape(0.dp)
-                            val reveal = if (animation == null) Modifier else Modifier.clipToBounds().layout { measurable, constraints ->
-                                val child = measurable.measure(constraints)
-                                val amount = animation.value.coerceIn(0f, 1f)
-                                val height = (child.height * amount).roundToInt()
-                                layout(child.width, height) {
-                                    child.placeRelativeWithLayer(0, ((height - child.height) * .3f).roundToInt()) {
-                                        alpha = amount
-                                    }
-                                }
+            for (group in groups) {
+                val expanded = group.id !in collapsed || keyword.isNotEmpty()
+                val animation = changing[group.id]?.takeIf { keyword.isEmpty() }
+                val cells = cellsByGroup[group.id].orEmpty()
+                val visibleCells = if (animation != null) cells.take(revealRowLimit * if (listView) 1 else 2) else cells
+                item(key = "header:${group.id}", span = { GridItemSpan(maxLineSpan) }, contentType = "header") {
+                    SubscriptionHeader(
+                        group, expanded, cells.isNotEmpty(), animation, working, keyword.isNotEmpty(),
+                        loading = pinging && (pingTarget == null || pingTarget == group.id),
+                        refresh = { refresh(group) },
+                        toggle = {
+                            val progress = changing[group.id]
+                                ?: Animatable(if (expanded) 1f else 0f).also { changing[group.id] = it }
+                            collapsed = ArrayList(if (expanded) collapsed + group.id else collapsed.filterNot { it == group.id })
+                            scope.launch {
+                                progress.animateTo(if (expanded) 0f else 1f, motion.defaultSpatialSpec())
+                                if (changing[group.id] === progress) changing.remove(group.id)
                             }
-                            Row(
-                                reveal.fillMaxWidth().clip(shape).background(colors.surfaceContainerLow)
-                                    .padding(start = 14.dp, end = 14.dp, bottom = if (index == groupRows.lastIndex) 10.dp else 7.dp),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                val section = row.first().sectionLabel
-                                if (section != null) {
-                                    ServerSection(section) { details(row.first()) }
-                                } else {
-                                    for (server in row) {
-                                        ServerCard(Modifier.weight(1f), server, server.id == profiles.selected, linear,
-                                            { select(server.id) }, { details(server) }, { favorite(server) })
-                                    }
-                                    if (!linear && row.size == 1) Spacer(Modifier.weight(1f))
-                                }
+                        },
+                        ping = { ping(fullGroups[group.id]?.servers.orEmpty().filter { it.sectionLabel == null }.map(FlowServer::id), group.id) },
+                        edit = { subscriptionOptions(group) },
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
+                if (expanded || animation != null) {
+                    items(
+                        visibleCells,
+                        key = { "server:${it.server.id}" },
+                        span = { GridItemSpan(if (it.slot.fullSpan) maxLineSpan else 1) },
+                        contentType = { if (it.server.sectionLabel == null) "server" else "divider" },
+                    ) { cell ->
+                        val movement = if (animation == null) Modifier.animateItem(
+                            fadeInSpec = motion.fastEffectsSpec(),
+                            fadeOutSpec = motion.fastEffectsSpec(),
+                            placementSpec = motion.defaultSpatialSpec(),
+                        ) else Modifier.subscriptionReveal(animation)
+                        val server = cell.server
+                        Box(
+                            movement.fillMaxWidth().clip(cell.shape).background(colors.surfaceContainerLow),
+                        ) {
+                            val inside = Modifier.fillMaxWidth(if (cell.slot == ServerCellSlot.HALF_ROW) .5f else 1f)
+                                .padding(
+                                    start = if (cell.slot == ServerCellSlot.END) 4.dp else 14.dp,
+                                    end = if (cell.slot == ServerCellSlot.START || cell.slot == ServerCellSlot.HALF_ROW) 4.dp else 14.dp,
+                                    bottom = if (cell.lastRow) 10.dp else 7.dp,
+                                )
+                            val section = server.sectionLabel
+                            if (section != null) {
+                                Box(inside) { ServerSection(section) { details(server) } }
+                            } else {
+                                ServerCard(
+                                    inside.graphicsLayer {
+                                        val distance = abs(viewProgress.value - if (listView) 1f else 0f).coerceIn(0f, 1f)
+                                        scaleX = 1f - distance * (if (listView) .12f else .08f)
+                                        scaleY = 1f - distance * .07f
+                                        alpha = 1f - distance * .24f
+                                        transformOrigin = TransformOrigin(if (listView) .25f else .5f, .25f)
+                                    },
+                                    server, server.id == profiles.selected, listView,
+                                    { select(server.id) }, { details(server) }, { favorite(server) },
+                                )
                             }
                         }
                     }
                 }
             }
         }
+
         Column(
             Modifier.align(Alignment.TopCenter).fillMaxWidth().zIndex(1f).onSizeChanged { headerHeight = it.height }
                 .padding(bottom = headerBottomPadding.coerceAtLeast(0.dp)),
@@ -270,7 +276,7 @@ internal fun ServersPage(
                 ActionSquare(R.drawable.flow_add, R.string.flow_add, 52.dp, colors.primary, colors.onPrimary, add, !working)
             }
             Spacer(Modifier.height(5.dp))
-            ServerSearch(search, searchChanged, atTop, listState.isScrollInProgress, sorted, toggleSort,
+            ServerSearch(search, searchChanged, atTop, sorted, toggleSort,
                 profiles.groups.count { it.subscription != null } > 1, reorder)
             AnimatedVisibility(
                 atTop,
@@ -280,7 +286,6 @@ internal fun ServersPage(
                 Box(Modifier.padding(top = 12.dp)) {
                     ServerViewSwitch(listView) { mode ->
                         if (mode != listView) {
-                            (if (mode) linearState else gridState).requestScrollToItem(0)
                             listView = mode
                             MmkvManager.encodeSettings(FlowPreferences.SERVER_LIST_VIEW, mode)
                         }
@@ -291,6 +296,38 @@ internal fun ServersPage(
         }
     }
 }
+
+private enum class ServerCellSlot(val fullSpan: Boolean) { FULL(true), START(false), END(false), HALF_ROW(true) }
+
+private data class ServerCell(val server: FlowServer, val slot: ServerCellSlot, val lastRow: Boolean) {
+    val shape = RoundedCornerShape(
+        bottomStart = if (lastRow && slot != ServerCellSlot.END) 22.dp else 0.dp,
+        bottomEnd = if (lastRow && slot != ServerCellSlot.START) 22.dp else 0.dp,
+    )
+}
+
+private fun List<FlowServer>.cells(listView: Boolean): List<ServerCell> {
+    val rows = sectionRows(if (listView) 1 else 2)
+    return rows.flatMapIndexed { index, row ->
+        val last = index == rows.lastIndex
+        when {
+            listView || row.first().sectionLabel != null -> listOf(ServerCell(row.first(), ServerCellSlot.FULL, last))
+            row.size == 1 -> listOf(ServerCell(row.first(), ServerCellSlot.HALF_ROW, last))
+            else -> listOf(ServerCell(row[0], ServerCellSlot.START, last), ServerCell(row[1], ServerCellSlot.END, last))
+        }
+    }
+}
+
+private fun Modifier.subscriptionReveal(progress: Animatable<Float, AnimationVector1D>): Modifier =
+    clipToBounds().layout { measurable, constraints ->
+        val child = measurable.measure(constraints)
+        val amount = progress.value.coerceIn(0f, 1f)
+        val height = (child.height * amount).roundToInt()
+        layout(child.width, height) {
+            child.placeRelativeWithLayer(0, ((height - child.height) * .3f).roundToInt()) { alpha = amount }
+        }
+    }
+
 
 private fun List<FlowServer>.sortWithinSections(): List<FlowServer> = buildList(size) {
     var start = 0
@@ -377,118 +414,140 @@ private fun ServerSection(label: String, options: () -> Unit) {
 
 @Composable
 private fun ServerSearch(
-    search: String, searchChanged: (String) -> Unit, atTop: Boolean, scrolling: Boolean,
-    sorted: Boolean, toggleSort: () -> Unit,
-    reorderEnabled: Boolean, reorder: () -> Unit,
+    search: String, searchChanged: (String) -> Unit, atTop: Boolean,
+    sorted: Boolean, toggleSort: () -> Unit, reorderEnabled: Boolean, reorder: () -> Unit,
 ) {
     val colors = MaterialTheme.colorScheme
     val motion = MaterialTheme.motionScheme
     var opened by rememberSaveable { mutableStateOf(false) }
-    var focused by remember { mutableStateOf(false) }
-    val expanded = atTop || opened
     val requester = remember { FocusRequester() }
     val focus = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    val hint = stringResource(R.string.flow_server_search)
     fun close() {
         focus.clearFocus()
+        keyboard?.hide()
         opened = false
         searchChanged("")
     }
-    BackHandler(focused || opened || search.isNotEmpty()) { close() }
-    LaunchedEffect(scrolling) { if (scrolling) opened = false }
-    LaunchedEffect(expanded, opened) {
+    BackHandler(opened || search.isNotEmpty()) { close() }
+    LaunchedEffect(opened) {
         if (opened) {
             withFrameNanos { }
             requester.requestFocus()
-        } else if (!expanded && focused) focus.clearFocus()
+            keyboard?.show()
+        }
     }
 
-    val expandedSortWidth = if (LocalConfiguration.current.screenWidthDp < 360) 105.dp else 127.dp
-    val sortWidth by animateDpAsState(if (atTop) expandedSortWidth else 52.dp,
-        motion.defaultSpatialSpec(), label = "sort width")
-    val sortLabel = stringResource(if (sorted) R.string.flow_by_ping else R.string.flow_by_order)
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-        BoxWithConstraints(Modifier.weight(1f).height(52.dp)) {
-            val shape = RoundedCornerShape(18.dp)
-            val hint = stringResource(R.string.flow_server_search)
-            val width by animateDpAsState(if (expanded) maxWidth else 52.dp, motion.defaultSpatialSpec(), label = "search width")
-            val corner by animateDpAsState(if (expanded) 26.dp else 18.dp, motion.fastSpatialSpec(), label = "search shape")
-            val textOpacity by animateFloatAsState(if (expanded) 1f else 0f, motion.fastEffectsSpec(), label = "search text")
-            val fieldStyle = MaterialTheme.typography.bodyMedium.copy(color = colors.onSurface)
-            val interaction = remember { MutableInteractionSource() }
-            val click = if (expanded) Modifier else Modifier
-                .semantics { contentDescription = hint }
-                .flowPress(interaction)
-                .clickable(interaction, ripple(), role = Role.Button) { opened = true }
-            Box(
-                Modifier.width(width.coerceIn(52.dp, maxWidth.coerceAtLeast(52.dp))).fillMaxHeight()
-                    .clip(RoundedCornerShape(corner))
-                    .background(if (!expanded && search.isNotBlank()) colors.secondaryContainer else colors.surfaceContainerHigh)
-                    .then(click),
-            ) {
-                Box(Modifier.align(Alignment.CenterStart).size(52.dp), contentAlignment = Alignment.Center) {
-                    FlowIcon(R.drawable.flow_symbol_search, 21.dp, colors.onSurfaceVariant)
-                }
-                if (expanded || textOpacity > .02f) {
-                    BasicTextField(
-                        value = search, onValueChange = searchChanged, singleLine = true, textStyle = fieldStyle,
-                        cursorBrush = SolidColor(colors.primary),
-                        modifier = Modifier.fillMaxSize().padding(start = 48.dp, end = if (search.isEmpty()) 12.dp else 44.dp)
-                            .graphicsLayer { alpha = textOpacity.coerceIn(0f, 1f) }
-                            .focusRequester(requester).onFocusChanged { focused = it.hasFocus }
-                            .semantics { contentDescription = hint },
-                        decorationBox = { input ->
-                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.CenterStart) {
-                                if (search.isEmpty()) Text(hint, style = fieldStyle, color = colors.onSurfaceVariant,
-                                    maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                input()
-                            }
-                        },
-                    )
-                    if (expanded && search.isNotEmpty() && width > 99.dp) {
-                        IconButton(onClick = ::close, modifier = Modifier.align(Alignment.CenterEnd).size(44.dp).clip(shape)) {
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val expandedSort = atTop && !opened
+        val toolbarWidth = maxWidth
+        val sortWidth by animateDpAsState(
+            if (expandedSort) (toolbarWidth * .34f).coerceIn(108.dp, 136.dp) else 52.dp,
+            motion.defaultSpatialSpec(), label = "sort width",
+        )
+        val sortIconWidth by animateDpAsState(if (expandedSort) 43.dp else 52.dp,
+            motion.defaultSpatialSpec(), label = "sort icon position")
+        val sortTextAlpha by animateFloatAsState(if (expandedSort) 1f else 0f,
+            motion.fastEffectsSpec(), label = "sort text")
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            BoxWithConstraints(Modifier.weight(1f).height(52.dp)) {
+                val searchProgress by animateFloatAsState(if (opened || atTop) 1f else 0f,
+                    motion.defaultSpatialSpec(), label = "search width")
+                val width = 52.dp + (maxWidth - 52.dp).coerceAtLeast(0.dp) * searchProgress.coerceIn(0f, 1f)
+                val corner by animateDpAsState(if (opened || atTop) 26.dp else 18.dp,
+                    motion.fastSpatialSpec(), label = "search shape")
+                val interaction = remember { MutableInteractionSource() }
+                val style = MaterialTheme.typography.bodyMedium.copy(color = colors.onSurface)
+                val click = if (opened) Modifier else Modifier
+                    .semantics { contentDescription = hint }
+                    .flowPress(interaction)
+                    .clickable(interaction, ripple(), role = Role.Button) { opened = true }
+                Box(
+                    Modifier.width(width).fillMaxHeight().clip(RoundedCornerShape(corner.coerceAtLeast(0.dp)))
+                        .background(if (!opened && search.isNotBlank()) colors.secondaryContainer else colors.surfaceContainerHigh)
+                        .then(click),
+                    contentAlignment = Alignment.CenterStart,
+                ) {
+                    Box(Modifier.size(46.dp, 52.dp), contentAlignment = Alignment.Center) {
+                        FlowIcon(R.drawable.flow_symbol_search, 21.dp, colors.onSurfaceVariant)
+                    }
+                    if (opened) {
+                        BasicTextField(
+                            value = search, onValueChange = searchChanged, singleLine = true, textStyle = style,
+                            cursorBrush = SolidColor(colors.primary),
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                            keyboardActions = KeyboardActions(onSearch = { keyboard?.hide() }),
+                            modifier = Modifier.fillMaxSize().padding(start = 46.dp, end = 44.dp)
+                                .focusRequester(requester).semantics { contentDescription = hint },
+                            decorationBox = { input ->
+                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.CenterStart) {
+                                    if (search.isEmpty()) Text(hint, style = style, color = colors.onSurfaceVariant, maxLines = 1)
+                                    input()
+                                }
+                            },
+                        )
+                        IconButton(
+                            onClick = ::close,
+                            modifier = Modifier.align(Alignment.CenterEnd).size(44.dp),
+                        ) {
                             FlowIcon(R.drawable.flow_symbol_close, 20.dp, colors.onSurfaceVariant,
                                 stringResource(R.string.flow_clear_search))
                         }
+                    } else if (searchProgress > .05f) {
+                        Text(hint, Modifier.padding(start = 46.dp, end = 8.dp).clearAndSetSemantics {}
+                            .graphicsLayer { alpha = searchProgress.coerceIn(0f, 1f) },
+                            style = style, color = colors.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
             }
-        }
-        ActionSquare(R.drawable.flow_symbol_swap_vert, R.string.flow_reorder_subscriptions, 52.dp,
-            colors.surfaceContainerHigh, colors.onSurfaceVariant, reorder, reorderEnabled)
-        val sortInteraction = remember { MutableInteractionSource() }
-        val sortPressed by sortInteraction.collectIsPressedAsState()
-        val sortRadius by animateDpAsState(
-            if (sortPressed) 12.dp else if (sorted) 26.dp else 18.dp,
-            motion.fastSpatialSpec(), label = "sort shape",
-        )
-        val sortFill by animateColorAsState(if (sorted) colors.secondaryContainer else colors.surfaceContainerHigh,
-            motion.fastEffectsSpec(), label = "sort color")
-        val sortInk by animateColorAsState(if (sorted) colors.onSecondaryContainer else colors.onSurfaceVariant,
-            motion.fastEffectsSpec(), label = "sort ink")
-        val sortTextAlpha by animateFloatAsState(if (atTop) 1f else 0f, motion.fastEffectsSpec(), label = "sort text")
-        Row(
-            Modifier.width(sortWidth.coerceAtLeast(52.dp)).height(52.dp).flowPress(sortInteraction)
-                .clip(RoundedCornerShape(sortRadius.coerceAtLeast(0.dp))).background(sortFill)
-                .semantics { contentDescription = sortLabel }
-                .clickable(sortInteraction, ripple(), role = Role.Button, onClick = toggleSort),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(Modifier.size(52.dp), contentAlignment = Alignment.Center) {
-                FlowToggleContent(sorted, Modifier.size(25.dp), label = "sort icon") { byLatency ->
-                    FlowIcon(if (byLatency) R.drawable.flow_sort_latency else R.drawable.flow_sort, 20.dp, sortInk)
+            Spacer(Modifier.width(8.dp))
+            AnimatedVisibility(
+                visible = !opened,
+                enter = expandHorizontally(motion.defaultSpatialSpec(), expandFrom = Alignment.End) + fadeIn(motion.fastEffectsSpec()),
+                exit = shrinkHorizontally(motion.fastSpatialSpec(), shrinkTowards = Alignment.End) + fadeOut(motion.fastEffectsSpec()),
+            ) {
+                Box(Modifier.padding(end = 8.dp)) {
+                    ActionSquare(R.drawable.flow_symbol_swap_vert, R.string.flow_reorder_subscriptions, 52.dp,
+                        colors.surfaceContainerHigh, colors.onSurfaceVariant, reorder, reorderEnabled && !opened)
                 }
             }
-            if (sortWidth > 58.dp) {
-                FlowToggleContent(sorted,
-                    modifier = Modifier.weight(1f).padding(end = 6.dp).graphicsLayer { alpha = sortTextAlpha.coerceIn(0f, 1f) }
-                        .clearAndSetSemantics {},
-                    label = "sort order") { byLatency ->
-                    BasicText(
-                        stringResource(if (byLatency) R.string.flow_by_ping else R.string.flow_by_order),
-                        style = MaterialTheme.typography.labelMedium.copy(color = sortInk, letterSpacing = 0.sp),
-                        autoSize = TextAutoSize.StepBased(9.sp, 12.sp, .5.sp),
-                        softWrap = false, maxLines = 1, overflow = TextOverflow.Clip,
-                    )
+            val sortInteraction = remember { MutableInteractionSource() }
+            val sortPressed by sortInteraction.collectIsPressedAsState()
+            val sortRadius by animateDpAsState(
+                if (sortPressed) 12.dp else if (sorted) 26.dp else 18.dp,
+                motion.fastSpatialSpec(), label = "sort shape",
+            )
+            val sortFill by animateColorAsState(if (sorted) colors.secondaryContainer else colors.surfaceContainerHigh,
+                motion.fastEffectsSpec(), label = "sort color")
+            val sortInk by animateColorAsState(if (sorted) colors.onSecondaryContainer else colors.onSurfaceVariant,
+                motion.fastEffectsSpec(), label = "sort ink")
+            val sortLabel = stringResource(if (sorted) R.string.flow_by_ping else R.string.flow_by_order)
+            Row(
+                Modifier.width(sortWidth.coerceAtLeast(52.dp)).height(52.dp).flowPress(sortInteraction)
+                    .clip(RoundedCornerShape(sortRadius.coerceAtLeast(0.dp))).background(sortFill)
+                    .semantics { contentDescription = sortLabel }
+                    .clickable(sortInteraction, ripple(), role = Role.Button, onClick = toggleSort),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(Modifier.width(sortIconWidth.coerceIn(40.dp, 52.dp)).fillMaxHeight(), contentAlignment = Alignment.Center) {
+                    FlowToggleContent(sorted, Modifier.size(26.dp), label = "sort icon") { byLatency ->
+                        FlowIcon(if (byLatency) R.drawable.flow_sort_latency else R.drawable.flow_sort, 20.dp, sortInk)
+                    }
+                }
+                if (sortTextAlpha > .02f && sortWidth > 64.dp) {
+                    FlowToggleContent(sorted,
+                        modifier = Modifier.weight(1f).padding(end = 8.dp).clipToBounds()
+                            .graphicsLayer { alpha = sortTextAlpha.coerceIn(0f, 1f) }.clearAndSetSemantics {},
+                        label = "sort order",
+                    ) { byLatency ->
+                        BasicText(
+                            stringResource(if (byLatency) R.string.flow_by_ping else R.string.flow_by_order),
+                            style = MaterialTheme.typography.labelMedium.copy(color = sortInk, letterSpacing = 0.sp),
+                            autoSize = TextAutoSize.StepBased(9.sp, 13.sp, .5.sp),
+                            softWrap = false, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
             }
         }
@@ -496,6 +555,7 @@ private fun ServerSearch(
 }
 
 @Composable
+
 internal fun FlowSearchField(
     query: String, change: (String) -> Unit, label: Int, modifier: Modifier = Modifier, clear: (() -> Unit)? = null,
 ) {
@@ -583,29 +643,38 @@ private fun ServerCard(
     val foreground by animateColorAsState(if (selected) colors.onPrimary else colors.onSurface, motion.fastEffectsSpec())
     val supporting by animateColorAsState(if (selected) colors.onPrimary else colors.onSurfaceVariant, motion.fastEffectsSpec())
     val background by animateColorAsState(if (selected) colors.primary else colors.surfaceContainerHigh, motion.defaultEffectsSpec())
-    val card = modifier.heightIn(min = if (listView) 64.dp else 156.dp)
+    val card = modifier.animateContentSize(motion.defaultSpatialSpec()).heightIn(min = if (listView) 64.dp else 156.dp)
         .flowPress(interaction).clip(RoundedCornerShape(15.dp)).background(background)
         .combinedClickable(
             interactionSource = interaction, indication = ripple(), onClick = select, onLongClick = details,
             onLongClickLabel = stringResource(R.string.flow_profile_options),
-        ).padding(horizontal = 12.dp, vertical = if (listView) 12.dp else 9.dp)
+        )
 
     if (listView) {
-        Row(card, horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.width(32.dp), contentAlignment = Alignment.Center) { Flag(server.country, supporting) }
-            ServerSummary(server, foreground, supporting, Modifier.weight(1f))
-            Column(Modifier.width(84.dp), horizontalAlignment = Alignment.End,
-                verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Row(Modifier.width(44.dp).height(22.dp), horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.End),
-                    verticalAlignment = Alignment.CenterVertically) {
-                    ServerSelectionMark(selected, foreground)
-                    ServerFavorite(server.favorite, supporting, favorite, compact = true)
-                }
+        val inset = 12.dp
+        Box(card) {
+            Row(
+                Modifier.align(Alignment.CenterStart).fillMaxWidth()
+                    .padding(start = inset, end = inset + 94.dp, top = inset, bottom = inset),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(Modifier.width(32.dp), contentAlignment = Alignment.Center) { Flag(server.country, supporting) }
+                ServerSummary(server, foreground, supporting, Modifier.weight(1f))
+            }
+            Row(
+                Modifier.align(Alignment.TopEnd).padding(top = inset, end = inset).height(20.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically,
+            ) {
+                ServerSelectionMark(selected, foreground)
+                ServerFavorite(server.favorite, supporting, favorite, compact = true)
+            }
+            Box(Modifier.align(Alignment.BottomEnd).padding(end = inset, bottom = inset).widthIn(max = 84.dp)) {
                 Latency(server.delayMillis, selected, compact = true)
             }
         }
     } else {
-        Column(card, verticalArrangement = Arrangement.SpaceBetween) {
+        Column(card.padding(horizontal = 12.dp, vertical = 9.dp), verticalArrangement = Arrangement.SpaceBetween) {
             Column {
                 Row(Modifier.fillMaxWidth().height(23.dp), horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically) {
@@ -649,7 +718,7 @@ private fun ServerFavorite(marked: Boolean, ink: Color, change: () -> Unit, comp
     val interaction = remember { MutableInteractionSource() }
     val label = stringResource(if (marked) R.string.flow_favorite_remove else R.string.flow_favorite_add)
     Box(
-        Modifier.size(if (compact) 24.dp else 28.dp, if (compact) 22.dp else 30.dp)
+        Modifier.size(if (compact) 24.dp else 28.dp, if (compact) 20.dp else 30.dp)
             .clip(RoundedCornerShape(9.dp)).flowPress(interaction)
             .semantics { contentDescription = label }
             .toggleable(marked, interaction, ripple(), role = Role.Checkbox) { change() },

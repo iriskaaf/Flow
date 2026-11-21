@@ -337,10 +337,13 @@ private fun ConnectionStatus(running: Boolean, pending: Boolean, systemColors: B
         label = "connection status shape")
     val status = if (pending) R.string.flow_busy else if (running) R.string.flow_on else R.string.flow_off
     val label = stringResource(status)
+    Surface(
+        modifier = Modifier.clearAndSetSemantics { contentDescription = label },
+        shape = RoundedCornerShape(radius.coerceAtLeast(0.dp)),
+        color = background,
+    ) {
     AnimatedContent(
         status,
-        Modifier.clip(RoundedCornerShape(radius.coerceAtLeast(0.dp))).background(background)
-            .clearAndSetSemantics { contentDescription = label },
         contentAlignment = Alignment.CenterEnd,
         transitionSpec = {
             val direction = if (targetState == R.string.flow_off) -1 else 1
@@ -364,6 +367,7 @@ private fun ConnectionStatus(running: Boolean, pending: Boolean, systemColors: B
             Text(stringResource(state), color = if (connected) connectedInk else colors.onSurface,
                 fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.SemiBold)
         }
+    }
     }
 }
 

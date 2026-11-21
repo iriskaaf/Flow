@@ -1,62 +1,92 @@
 <p align="center">
-  <img src="V2rayNG/app/src/main/res/drawable-xxxhdpi/flow_logo.png" width="96" height="96" alt="Логотип Flow">
+  <img src="V2rayNG/app/src/main/res/drawable-xxxhdpi/flow_logo.png" width="96" height="96" alt="Flow logo">
 </p>
 
 <h1 align="center">Flow</h1>
 
+<p align="center">A native Xray client for Android, built on v2rayNG.<br>Jetpack Compose · Material 3 Expressive</p>
+
 <p align="center">
-  Нативный Android-клиент Xray на базе v2rayNG.<br>
-  Интерфейс на Jetpack Compose и Material 3 Expressive.
+  <strong>English</strong> · <a href="README.ru.md"><kbd>Русский</kbd></a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/iriskaaf/Flow/releases/latest"><img alt="Последний релиз" src="https://img.shields.io/github/v/release/iriskaaf/Flow?style=flat-square"></a>
-  <a href="https://github.com/iriskaaf/Flow/releases"><img alt="Загрузки" src="https://img.shields.io/github/downloads/iriskaaf/Flow/total?style=flat-square"></a>
+  <a href="https://github.com/iriskaaf/Flow/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/iriskaaf/Flow?style=flat-square"></a>
+  <a href="https://github.com/iriskaaf/Flow/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/iriskaaf/Flow/total?style=flat-square"></a>
   <a href="LICENSE"><img alt="GPL-3.0" src="https://img.shields.io/badge/license-GPL--3.0-4f46e5?style=flat-square"></a>
-  <img alt="Android 7.0 и новее" src="https://img.shields.io/badge/Android-7.0%2B-3ddc84?style=flat-square">
+  <img alt="Android 7.0 and newer" src="https://img.shields.io/badge/Android-7.0%2B-3ddc84?style=flat-square">
 </p>
 
 <p align="center">
-  <a href="https://github.com/iriskaaf/Flow/releases/latest/download/Flow.apk"><strong>Скачать Flow.apk</strong></a>
-  · <a href="https://github.com/iriskaaf/Flow/releases">Архив релизов</a>
-  · <a href="https://github.com/iriskaaf/Flow/issues">Сообщить об ошибке</a>
+  <a href="https://github.com/iriskaaf/Flow/releases/latest/download/Flow.apk"><strong>Download Flow.apk</strong></a>
+  · <a href="https://github.com/iriskaaf/Flow/releases">Release archive</a>
+  · <a href="https://github.com/iriskaaf/Flow/issues">Report an issue</a>
 </p>
 
-## Возможности
+## Screenshots
 
-- Импорт подписок и профилей из буфера обмена, QR-кода и ссылки. Поддержка HWID для совместимых HTTPS-подписок.
-- Сетка и список серверов, поиск, сортировка по задержке, закреплённые избранные профили и произвольный порядок подписок.
-- Три режима маршрутизации по приложениям и быстрое добавление распространённых российских сервисов.
-- Плитка Android для подключения и отключения, системная светлая и тёмная темы, уведомления о подключении.
-- Проверка и установка обновлений из GitHub Releases внутри приложения.
+Captured in Flow with demo subscriptions and sample apps.
 
-## Установка
+<table>
+  <tr>
+    <th>Connection and favorites</th>
+    <th>Server grid</th>
+    <th>Server list</th>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/home.png" width="240" alt="Connected VPN and favorite servers"></td>
+    <td><img src="docs/screenshots/servers-grid.png" width="240" alt="Demo subscription with server cards"></td>
+    <td><img src="docs/screenshots/servers-list.png" width="240" alt="Server list with provider descriptions and favorite stars"></td>
+  </tr>
+  <tr>
+    <th>Expanded search</th>
+    <th>Per-app routing</th>
+    <th>System VPN notification</th>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/search.png" width="240" alt="Search field expanded with compact sorting"></td>
+    <td><img src="docs/screenshots/routing.png" width="240" alt="Selected demo apps in per-app routing"></td>
+    <td><img src="docs/screenshots/vpn-notification.png" width="240" alt="Flow VPN notification in the Android notification shade"></td>
+  </tr>
+</table>
 
-1. Скачайте универсальный `Flow.apk` из [последнего релиза](https://github.com/iriskaaf/Flow/releases/latest) и откройте файл на Android 7.0 или новее.
-2. На вкладке **Серверы** нажмите **+** и импортируйте профиль или подписку. Flow подключается к серверу из вашего профиля.
-3. Выберите сервер и включите VPN на главном экране. Android предложит подтвердить создание VPN при первом подключении.
+## Features
 
-### Обновления
+- Import profiles and subscriptions from links, the clipboard or QR codes. Compatible HTTPS providers can use a per-provider hardware ID (HWID).
+- Browse servers in a grid or list. Search, sort by latency, reorder subscriptions and keep favorite servers on the home screen.
+- Route all apps, only selected apps or all except selected apps. A preset can select supported Russian services that are installed on the device.
+- Connect from the Android Quick Settings tile and use the Flow palette or system colors.
+- Check for and install signed updates from GitHub Releases in the app.
 
-Откройте **Настройки → О приложении → Проверить обновления**. Flow найдёт более свежий стабильный релиз на GitHub, скачает универсальный APK, сверит его SHA-256 и сравнит подпись с установленной версией. При установке Android покажет системное подтверждение.
+### Native Dynamic Island
 
-Если Android запрашивает разрешение на установку приложений из Flow, его можно выдать в открывшемся системном экране. Для обновления вручную откройте APK из [GitHub Releases](https://github.com/iriskaaf/Flow/releases).
+Flow publishes its active VPN status through the system notification. On compatible Android 16 and newer devices, it requests a native [Live Update](https://developer.android.com/develop/ui/views/notifications/live-update) chip with the Flow icon and profile country. The regular VPN notification is available across supported Android versions when notifications are enabled. Chip availability and placement depend on the firmware and notification permissions. Xiaomi Super Island additionally requires manufacturer approval for the app. [Integration details](README.Flow.md#статус-vpn-в-системе)
 
-## Сборка из исходников
+Enable the feature in [Settings → Dynamic Island](docs/screenshots/island-settings.png). The Android 16 test image rendered the regular VPN notification shown above.
 
-Понадобятся JDK 21 и Android SDK Platform 37. Откройте папку `V2rayNG` в Android Studio или выполните команды из терминала.
+## Install
+
+1. Download the universal `Flow.apk` from the [latest release](https://github.com/iriskaaf/Flow/releases/latest) and open it on Android 7.0 or newer.
+2. In **Servers**, use **+** to add a profile or subscription. Flow uses the server defined by your configuration.
+3. Select a server and connect on the home screen. Android asks you to approve the VPN connection on first use.
+
+### Updates
+
+Go to **Settings → About → Check for updates**. Flow downloads the latest stable APK from GitHub, checks the SHA-256 digest and verifies that the signing certificate matches the installed app. Android prompts you to confirm installation.
+
+## Build from source
+
+Use JDK 21 and Android SDK Platform 37. Open `V2rayNG` in Android Studio or use the command line.
 
 ```sh
 cd V2rayNG
 ./gradlew :app:assemblePlaystoreDebug :app:testPlaystoreDebugUnitTest
 ```
 
-На Windows используйте `gradlew.bat`. APK появится в `V2rayNG/app/build/outputs/apk/playstore/debug/`. В репозитории есть нативные библиотеки для `arm64-v8a`, `armeabi-v7a`, `x86_64` и `x86`. Локальная отладочная сборка подписывается ключом вашей среды.
+On Windows, use `gradlew.bat`. Find the APK in `V2rayNG/app/build/outputs/apk/playstore/debug/`. Native libraries for `arm64-v8a`, `armeabi-v7a`, `x86_64` and `x86` are included. Local debug builds use your environment's signing key.
 
-[Подробности о HWID, уведомлениях и системных индикаторах](README.Flow.md)
+## Design and license
 
-## Дизайн и лицензия
-
-- Макеты интерфейса в [Figma](https://www.figma.com/design/aZIeNjiyeOGRtb2uTJ8f8j/XPRMNTS?node-id=5724-1740).
-- Исходная база [v2rayNG 2.1.8](https://github.com/2dust/v2rayNG/tree/2.1.8). Сетевое ядро [Xray-core](https://github.com/XTLS/Xray-core) подключено через [AndroidLibXrayLite](https://github.com/2dust/AndroidLibXrayLite/tree/v26.5.19). Для TUN используется [HEV SOCKS5 Tunnel](https://github.com/heiher/hev-socks5-tunnel/tree/dfabaa9cadf8894eb8ebfa0f75b1fee331869b34).
-- Код Flow распространяется по [GPL-3.0](LICENSE).
+- [Flow design in Figma](https://www.figma.com/design/aZIeNjiyeOGRtb2uTJ8f8j/XPRMNTS?node-id=5724-1740)
+- Based on [v2rayNG 2.1.8](https://github.com/2dust/v2rayNG/tree/2.1.8), with [Xray-core](https://github.com/XTLS/Xray-core) via [AndroidLibXrayLite](https://github.com/2dust/AndroidLibXrayLite/tree/v26.5.19) and [HEV SOCKS5 Tunnel](https://github.com/heiher/hev-socks5-tunnel/tree/dfabaa9cadf8894eb8ebfa0f75b1fee331869b34)
+- [GPL-3.0](LICENSE)

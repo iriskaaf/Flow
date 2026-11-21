@@ -18,6 +18,9 @@ internal val russianServicePackages = setOf(
     "ru.raiffeisennews",
     "ru.nspk.mirpay",
     "ru.sberbank.spasibo",
+    "ru.rshb.dbo",
+    "ru.letobank.Prometheus",
+    "com.yandex.bank",
 
     // Yandex services.
     "ru.yandex.searchplugin",
@@ -25,12 +28,38 @@ internal val russianServicePackages = setOf(
     "ru.yandex.yandexnavi",
     "ru.yandex.taxi",
     "ru.yandex.searchplugin.beta",
+    "com.yandex.searchapp",
     "com.yandex.browser",
     "ru.yandex.music",
     "ru.yandex.disk",
     "ru.yandex.mail",
     "ru.yandex.market",
+    "ru.beru.android",
     "ru.kinopoisk",
+    "com.yandex.iot",
+    "ru.yandex.weatherplugin",
+    "ru.yandex.key",
+    "com.yandex.internetometer",
+    "com.yandex.lavka",
+
+    // Cars, micromobility, and shipping.
+    "ru.auto.ara",
+    "ru.farpost.dromfilter",
+    "com.punicapp.whoosh",
+    "ru.urentbike.app",
+    "com.logistic.sdek",
+    "ru.dellin.cabinet",
+
+    // Retail, groceries, and dining.
+    "ru.dns.shop.android",
+    "ru.tander.magnit",
+    "ru.magnit.express.android",
+    "ru.pyaterochka.app.browser",
+    "ru.premiumbonus.vilkalozhka",
+    "ru.sbcs.store",
+    "ru.vkusvill",
+    "com.icemobile.lenta.prod",
+    "ru.filit.mvideo.b2c",
 
     // Marketplaces, communications, media, and other services.
     "ru.ozon.app.android",
@@ -47,4 +76,9 @@ internal val russianServicePackages = setOf(
     "ru.megafon.mlk",
     "ru.beeline.services",
     "ru.tele2.mytele2",
+    "ru.yota.android",
+    "com.blinkmap",
+    "com.blinkmap.rs",
+    "ru.hh.android",
+    "com.vk.vkvideo",
 )

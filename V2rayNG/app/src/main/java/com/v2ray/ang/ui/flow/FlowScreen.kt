@@ -16,11 +16,14 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.BringIntoViewSpec
+import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -106,6 +109,12 @@ private enum class FlowPage(val label: Int, val outline: Int, val filled: Int) {
     SERVERS(R.string.flow_servers, R.drawable.flow_symbol_dns, R.drawable.flow_symbol_dns_fill),
 }
 
+@OptIn(ExperimentalFoundationApi::class)
+private object PagerFocusScroll : BringIntoViewSpec {
+    override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float) = 0f
+}
+
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun FlowScreen(
     profiles: FlowProfiles,
@@ -176,7 +185,7 @@ internal fun FlowScreen(
             settingsPath = ArrayList(settingsPath.dropLast(1))
             screenState.removeState(page.name)
         }
-        BackHandler(welcomeCompleted && settingsPath.isEmpty() && pager.currentPage != FlowPage.HOME.ordinal) {
+        BackHandler(welcomeCompleted && settingsPath.isEmpty() && pager.settledPage != FlowPage.HOME.ordinal) {
             navigate(FlowPage.HOME)
         }
         BackHandler(settingsPath.isNotEmpty(), onBack = ::closeSettings)
@@ -233,6 +242,8 @@ internal fun FlowScreen(
                                 val systemBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
                                 val navigationInset = navigationHeight + navigationMargin + systemBottom + 12.dp
 
+                                val pageFocusScroll = LocalBringIntoViewSpec.current
+                                CompositionLocalProvider(LocalBringIntoViewSpec provides PagerFocusScroll) {
                                 HorizontalPager(
                                     state = pager,
                                     modifier = Modifier.fillMaxSize().clipToBounds(),
@@ -243,6 +254,7 @@ internal fun FlowScreen(
                                         snapPositionalThreshold = .32f,
                                     ),
                                 ) { index ->
+                                    CompositionLocalProvider(LocalBringIntoViewSpec provides pageFocusScroll) {
                                     Box(Modifier.fillMaxSize().clipToBounds(), contentAlignment = Alignment.TopCenter) {
                                         val pageModifier = Modifier.widthIn(max = 640.dp).fillMaxSize()
                                             .padding(start = edge, end = edge, top = top)
@@ -307,6 +319,8 @@ internal fun FlowScreen(
                                             )
                                         }
                                     }
+                                    }
+                                }
                                 }
                                 Box(
                                     Modifier.align(Alignment.BottomCenter).fillMaxWidth()
@@ -555,6 +569,10 @@ internal fun ActionSquare(
         if (loading) colors.secondaryContainer else background.copy(alpha = if (enabled) 1f else .45f),
         motion.fastEffectsSpec(), label = "action fill",
     )
+    val radius by animateDpAsState(
+        if (loading) size / 2 else size * .33f,
+        motion.defaultSpatialSpec(), label = "action shape",
+    )
     FilledIconButton(
         onClick = click,
         enabled = enabled && !loading,
@@ -563,7 +581,7 @@ internal fun ActionSquare(
             containerColor = container, contentColor = foreground,
             disabledContainerColor = container, disabledContentColor = foreground.copy(alpha = .58f),
         ),
-        shapes = IconButtonDefaults.shapes(RoundedCornerShape(size * .33f), RoundedCornerShape(size * .18f)),
+        shapes = IconButtonDefaults.shapes(RoundedCornerShape(radius.coerceIn(0.dp, size / 2)), RoundedCornerShape(size * .18f)),
     ) {
         Box(Modifier.fillMaxSize().semantics { contentDescription = title }, contentAlignment = Alignment.Center) {
             Crossfade(loading, modifier = Modifier.matchParentSize(),
@@ -624,6 +642,7 @@ private fun animateFlowColors(target: ColorScheme): ColorScheme {
         secondaryContainer = transition.animateColor({ spec }) { it.secondaryContainer }.value,
         onSecondaryContainer = transition.animateColor({ spec }) { it.onSecondaryContainer }.value,
         tertiary = transition.animateColor({ spec }) { it.tertiary }.value,
+        onTertiary = transition.animateColor({ spec }) { it.onTertiary }.value,
         tertiaryContainer = transition.animateColor({ spec }) { it.tertiaryContainer }.value,
         onTertiaryContainer = transition.animateColor({ spec }) { it.onTertiaryContainer }.value,
         surface = transition.animateColor({ spec }) { it.surface }.value,
